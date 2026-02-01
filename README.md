@@ -22,7 +22,7 @@ A terminal-based user interface (TUI) application for viewing and exploring SQLi
 Clone the repository and install in a virtual environment:
 
 ```bash
-git clone https://github.com/yourusername/sqlite-viewer.git
+git clone https://github.com/nanderq/sqlite-viewer.git
 cd sqlite-viewer
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
@@ -34,6 +34,28 @@ pip install -e .
 The application uses:
 - [Textual](https://github.com/Textualize/textual) - TUI framework
 - [Click](https://click.palletsprojects.com/) - Command-line interface
+
+## Testing
+
+Install development dependencies and run tests:
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+Run tests with verbose output:
+
+```bash
+pytest -v
+```
+
+The test suite covers:
+- Database connection and file validation
+- Schema introspection (tables, columns, indexes, foreign keys)
+- Query pagination
+- CSV/JSON export
+- Data type formatters
 
 ## Usage
 

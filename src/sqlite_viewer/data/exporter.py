@@ -15,16 +15,17 @@ class Exporter:
     def __init__(self, db: "DatabaseConnection") -> None:
         self.db = db
 
-    def _stream_table(
-        self, table_name: str, batch_size: int = 1000
-    ) -> Iterator[tuple[list[str], list[tuple[Any, ...]]]]:
-        """Stream table data in batches. Yields (columns, rows) tuples."""
+    def _get_columns(self, table_name: str) -> list[str]:
+        """Get column names for a table."""
         with self.db.cursor() as cur:
-            # Get column names
             cur.execute(f"SELECT * FROM {self._quote_identifier(table_name)} LIMIT 0")
-            columns = [desc[0] for desc in cur.description] if cur.description else []
+            return [desc[0] for desc in cur.description] if cur.description else []
 
-            # Stream rows in batches
+    def _stream_rows(
+        self, table_name: str, batch_size: int = 1000
+    ) -> Iterator[list[tuple[Any, ...]]]:
+        """Stream table rows in batches."""
+        with self.db.cursor() as cur:
             offset = 0
             while True:
                 cur.execute(
@@ -35,20 +36,18 @@ class Exporter:
                 rows = [tuple(row) for row in cur.fetchall()]
                 if not rows:
                     break
-                yield columns, rows
+                yield rows
                 offset += batch_size
 
     def export_csv(self, table_name: str, output_path: Path) -> int:
         """Export table to CSV file. Returns number of rows exported."""
+        columns = self._get_columns(table_name)
         row_count = 0
         with open(output_path, "w", newline="", encoding="utf-8") as f:
-            writer: csv.writer | None = None
-            for columns, rows in self._stream_table(table_name):
-                if writer is None:
-                    writer = csv.writer(f)
-                    writer.writerow(columns)
+            writer = csv.writer(f)
+            writer.writerow(columns)
+            for rows in self._stream_rows(table_name):
                 for row in rows:
-                    # Convert bytes to hex string for CSV
                     processed_row = [
                         self._format_value_for_csv(val) for val in row
                     ]
@@ -58,16 +57,16 @@ class Exporter:
 
     def export_json(self, table_name: str, output_path: Path) -> int:
         """Export table to JSON file. Returns number of rows exported."""
+        columns = self._get_columns(table_name)
         row_count = 0
         with open(output_path, "w", encoding="utf-8") as f:
             f.write("[\n")
             first = True
-            for columns, rows in self._stream_table(table_name):
+            for rows in self._stream_rows(table_name):
                 for row in rows:
                     if not first:
                         f.write(",\n")
                     first = False
-                    # Create dict with column names as keys
                     row_dict = {
                         col: self._format_value_for_json(val)
                         for col, val in zip(columns, row)
