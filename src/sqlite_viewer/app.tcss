@@ -1,0 +1,84 @@
+/* SQLite Viewer Stylesheet */
+
+Screen {
+    layout: grid;
+    grid-size: 1;
+}
+
+#main-container {
+    layout: horizontal;
+    height: 100%;
+}
+
+#sidebar {
+    width: 25%;
+    min-width: 20;
+    max-width: 40;
+    height: 100%;
+    border-right: solid $primary;
+}
+
+#sidebar TableTree {
+    height: 100%;
+}
+
+#content {
+    width: 75%;
+    height: 100%;
+}
+
+#content-tabs {
+    height: 100%;
+}
+
+/* Tab pane content */
+TabPane {
+    padding: 0;
+    height: 1fr;
+}
+
+#data-view {
+    height: 100%;
+}
+
+/* Schema display */
+#schema-content, #indexes-content, #fk-content {
+    padding: 1;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.schema-table {
+    width: 100%;
+}
+
+/* Footer */
+#footer {
+    dock: bottom;
+    height: 1;
+    background: $primary;
+    color: $text;
+    padding: 0 1;
+}
+
+/* No table selected message */
+.no-selection {
+    width: 100%;
+    height: 100%;
+    content-align: center middle;
+    color: $text-muted;
+}
+
+/* DataTable styling */
+DataTable {
+    height: 1fr;
+}
+
+DataTable > .datatable--header {
+    background: $primary;
+    color: $text;
+}
+
+DataTable > .datatable--cursor {
+    background: $secondary;
+}
