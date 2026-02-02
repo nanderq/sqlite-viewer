@@ -144,4 +144,5 @@ class SchemaInspector:
     @staticmethod
     def _quote_identifier(identifier: str) -> str:
         """Quote an identifier to prevent SQL injection."""
-        return f'"{identifier.replace('"', '""')}"'
+        escaped = identifier.replace('"', '""')
+        return f'"{escaped}"'

@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 from textual.app import App, ComposeResult
@@ -13,9 +14,12 @@ from sqlite_viewer.data.database import DatabaseConnection, validate_sqlite_file
 from sqlite_viewer.data.schema import SchemaInspector
 from sqlite_viewer.data.query import PaginatedQuery
 from sqlite_viewer.data.exporter import Exporter
+from sqlite_viewer.data.editor import RowEditor, RowData
 from sqlite_viewer.widgets.table_tree import TableTree
 from sqlite_viewer.widgets.data_table import PaginatedDataTable
 from sqlite_viewer.screens.export_dialog import ExportDialog
+from sqlite_viewer.screens.row_editor import RowEditorScreen, RowEditorResult, EditMode
+from sqlite_viewer.screens.confirm_dialog import ConfirmDialog
 
 
 class SQLiteViewerApp(App):
@@ -28,8 +32,11 @@ class SQLiteViewerApp(App):
         Binding("q", "quit", "Quit"),
         Binding("e", "export", "Export"),
         Binding("r", "refresh", "Refresh"),
-        Binding("tab", "focus_next", "Focus Next"),
-        Binding("shift+tab", "focus_previous", "Focus Prev"),
+        Binding("a", "add_row", "Add Row"),
+        Binding("enter", "edit_row", "Edit Row", show=False),
+        Binding("d", "delete_row", "Delete"),
+        Binding("tab", "focus_next", "Focus Next", show=False),
+        Binding("shift+tab", "focus_previous", "Focus Prev", show=False),
     ]
 
     def __init__(self, db_path: Path) -> None:
@@ -38,6 +45,7 @@ class SQLiteViewerApp(App):
         self.db = DatabaseConnection(db_path)
         self.schema = SchemaInspector(self.db)
         self.exporter = Exporter(self.db)
+        self.editor = RowEditor(self.db, self.schema)
         self._current_table: str | None = None
 
     def compose(self) -> ComposeResult:
@@ -145,6 +153,166 @@ class SQLiteViewerApp(App):
             self._load_table_data(self._current_table)
             self._load_schema_info(self._current_table)
             self.notify("Data refreshed", severity="information")
+
+    def action_add_row(self) -> None:
+        """Show the add row dialog."""
+        if self._current_table is None:
+            self.notify("Please select a table first", severity="warning")
+            return
+
+        columns = self.schema.get_columns(self._current_table)
+        pk_columns = self.editor.get_primary_key_columns(self._current_table)
+
+        self.push_screen(
+            RowEditorScreen(
+                table_name=self._current_table,
+                columns=columns,
+                mode=EditMode.ADD,
+                pk_columns=pk_columns,
+            ),
+            self._handle_row_editor_result,
+        )
+
+    def action_edit_row(self) -> None:
+        """Edit the currently selected row."""
+        if self._current_table is None:
+            self.notify("Please select a table first", severity="warning")
+            return
+
+        data_view = self.query_one("#data-view", PaginatedDataTable)
+        data_view.request_edit_selected()
+
+    def action_delete_row(self) -> None:
+        """Delete the currently selected row."""
+        if self._current_table is None:
+            self.notify("Please select a table first", severity="warning")
+            return
+
+        data_view = self.query_one("#data-view", PaginatedDataTable)
+        data_view.request_delete_selected()
+
+    def on_paginated_data_table_row_edit_requested(
+        self, event: PaginatedDataTable.RowEditRequested
+    ) -> None:
+        """Handle edit request from the data table."""
+        if self._current_table is None:
+            return
+
+        columns = self.schema.get_columns(self._current_table)
+        pk_columns = self.editor.get_primary_key_columns(self._current_table)
+
+        # Convert row data to dict
+        values = {col: val for col, val in zip(event.columns, event.row_data)}
+
+        self.push_screen(
+            RowEditorScreen(
+                table_name=self._current_table,
+                columns=columns,
+                mode=EditMode.EDIT,
+                values=values,
+                pk_columns=pk_columns,
+            ),
+            self._handle_row_editor_result,
+        )
+
+    def on_paginated_data_table_row_delete_requested(
+        self, event: PaginatedDataTable.RowDeleteRequested
+    ) -> None:
+        """Handle delete request from the data table."""
+        if self._current_table is None:
+            return
+
+        pk_columns = self.editor.get_primary_key_columns(self._current_table)
+        if not pk_columns:
+            self.notify("Cannot delete: table has no primary key", severity="error")
+            return
+
+        # Store data for the delete callback
+        self._pending_delete = {
+            "columns": event.columns,
+            "row_data": event.row_data,
+            "pk_columns": pk_columns,
+        }
+
+        # Build description of the row for confirmation
+        pk_values = []
+        for pk_col in pk_columns:
+            if pk_col in event.columns:
+                idx = event.columns.index(pk_col)
+                pk_values.append(f"{pk_col}={event.row_data[idx]}")
+        pk_desc = ", ".join(pk_values) if pk_values else "selected row"
+
+        self.push_screen(
+            ConfirmDialog(
+                title="Delete Row",
+                message=f"Are you sure you want to delete this row?\n\n{pk_desc}",
+                confirm_label="Delete",
+                cancel_label="Cancel",
+            ),
+            self._handle_delete_confirm,
+        )
+
+    def _handle_row_editor_result(self, result: RowEditorResult | None) -> None:
+        """Handle the result from the row editor dialog."""
+        if result is None or self._current_table is None:
+            return
+
+        try:
+            if result.mode == EditMode.ADD:
+                self.editor.insert_row(self._current_table, result.values)
+                self.notify("Row added successfully", severity="information")
+            else:
+                pk_columns = self.editor.get_primary_key_columns(self._current_table)
+                if not pk_columns:
+                    self.notify("Cannot update: table has no primary key", severity="error")
+                    return
+
+                self.editor.update_row(
+                    self._current_table,
+                    result.values,
+                    pk_columns,
+                    result.original_pk_values or {},
+                )
+                self.notify("Row updated successfully", severity="information")
+
+            # Refresh the data view
+            self._load_table_data(self._current_table)
+
+        except Exception as e:
+            self.notify(f"Error: {e}", severity="error")
+
+    def _handle_delete_confirm(self, confirmed: bool) -> None:
+        """Handle the delete confirmation result."""
+        if not confirmed or self._current_table is None:
+            self._pending_delete = None
+            return
+
+        pending = getattr(self, "_pending_delete", None)
+        if pending is None:
+            return
+
+        try:
+            pk_columns = pending["pk_columns"]
+            columns = pending["columns"]
+            row_data = pending["row_data"]
+
+            # Build pk_values dict
+            pk_values = {}
+            for pk_col in pk_columns:
+                if pk_col in columns:
+                    idx = columns.index(pk_col)
+                    pk_values[pk_col] = row_data[idx]
+
+            self.editor.delete_row(self._current_table, pk_columns, pk_values)
+            self.notify("Row deleted successfully", severity="information")
+
+            # Refresh the data view
+            self._load_table_data(self._current_table)
+
+        except Exception as e:
+            self.notify(f"Error: {e}", severity="error")
+        finally:
+            self._pending_delete = None
 
 
 @click.command()

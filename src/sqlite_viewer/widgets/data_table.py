@@ -1,7 +1,10 @@
 """Paginated data table widget."""
 
+from typing import Any
+
 from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal
+from textual.message import Message
 from textual.widgets import DataTable, Button, Static
 
 from sqlite_viewer.data.query import PaginatedQuery, PageResult
@@ -65,6 +68,24 @@ class PaginatedDataTable(Vertical):
     }
     """
 
+    class RowEditRequested(Message):
+        """Posted when user requests to edit a row."""
+
+        def __init__(self, row_index: int, row_data: tuple[Any, ...], columns: list[str]) -> None:
+            super().__init__()
+            self.row_index = row_index
+            self.row_data = row_data
+            self.columns = columns
+
+    class RowDeleteRequested(Message):
+        """Posted when user requests to delete a row."""
+
+        def __init__(self, row_index: int, row_data: tuple[Any, ...], columns: list[str]) -> None:
+            super().__init__()
+            self.row_index = row_index
+            self.row_data = row_data
+            self.columns = columns
+
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._query: PaginatedQuery | None = None
@@ -118,3 +139,34 @@ class PaginatedDataTable(Vertical):
         if self._query:
             self._query.invalidate_cache()
             self._load_page()
+
+    def get_selected_row(self) -> tuple[int, tuple[Any, ...], list[str]] | None:
+        """Get the currently selected row data.
+
+        Returns:
+            Tuple of (row_index, row_data, columns) or None if no selection.
+        """
+        if self._result is None or not self._result.rows:
+            return None
+
+        table = self.query_one("#data-table", DataTable)
+        if table.cursor_row is None or table.cursor_row >= len(self._result.rows):
+            return None
+
+        row_index = table.cursor_row
+        row_data = self._result.rows[row_index]
+        return (row_index, row_data, self._result.columns)
+
+    def request_edit_selected(self) -> None:
+        """Request to edit the currently selected row."""
+        selection = self.get_selected_row()
+        if selection:
+            row_index, row_data, columns = selection
+            self.post_message(self.RowEditRequested(row_index, row_data, columns))
+
+    def request_delete_selected(self) -> None:
+        """Request to delete the currently selected row."""
+        selection = self.get_selected_row()
+        if selection:
+            row_index, row_data, columns = selection
+            self.post_message(self.RowDeleteRequested(row_index, row_data, columns))
